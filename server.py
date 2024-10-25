@@ -1,42 +1,53 @@
-import socketio
-import eventlet
-from flask import Flask
+from flask import Flask, request
+from flask_socketio import SocketIO, join_room, emit
+from gevent import monkey
 
+# Necessário para que o SocketIO funcione de forma assíncrona com Flask
+monkey.patch_all()
+
+# Configuração inicial do Flask
 app = Flask(__name__)
-sio = socketio.Server(cors_allowed_origins="*")
-app.wsgi_app = socketio.WSGIApp(sio, app.wsgi_app)
+app.config['SECRET_KEY'] = 'your_secret_key'
 
+# Configuração do SocketIO com gevent
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="gevent")
+
+# ROUTES
 @app.route('/')
 def index():
     return "Servidor WebSocket está funcionando!"
 
-@sio.event
-def connect(sid, environ):
-    print(f"Cliente conectado: {sid}")
 
-@sio.event
-def joinRoom(sid, room):
-    sio.enter_room(sid, room)
-    print(f"Cliente {sid} entrou na sala {room}")
 
-@sio.event
-def moveMouse(sid, data):
-    room = data.get('room')
-    x = data.get('x')
-    y = data.get('y')
-    print(f"Movimento do mouse para X: {x}, Y: {y} na sala {room}")
+# SOCKETIO EVENTS
+@socketio.on('connect')
+def handle_connect():
+    print("Cliente conectado:", request.sid)
+    emit('connect', {'message': 'Conectado ao servidor WebSocket!'})
 
-    sio.emit("mouseMoved", {'x': x, 'y': y}, room=room, skip_sid=sid)
+@socketio.on('joinRoom')
+def handle_join_room(data):
+    room = data['room']
+    join_room(room)
+    print(f"Cliente {request.sid} entrou na sala: {room}")
+    emit('roomJoined', {'room': room}, to=room)
 
-@sio.event
-def click(sid, room):
-    print(f"Clique do mouse recebido na sala: {room}")
+@socketio.on('moveMouse')
+def handle_mouse_move(data):
+    room = data['room']
+    x, y = data['x'], data['y']
+    print(f"Movimento do mouse: X={x}, Y={y} na sala {room}")
+    emit('mouseMoved', {'x': x, 'y': y}, to=room)
 
-    sio.emit("mouseClicked", room=room, skip_sid=sid)
+@socketio.on('click')
+def handle_click(data):
+    room = data['room']
+    print(f"Clique recebido na sala: {room}")
+    emit('mouseClicked', {}, to=room)
 
-@sio.event
-def disconnect(sid):
-    print(f"Cliente desconectado: {sid}")
+@socketio.on('disconnect')
+def handle_disconnect():
+    print("Cliente desconectado:", request.sid)
 
-if __name__ == "__main__":
-    eventlet.wsgi.server(eventlet.listen(('0.0.0.0', 5000)), app)
+if __name__ == '__main__':
+    socketio.run(app, host='0.0.0.0', port=5000)
